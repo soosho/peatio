@@ -211,15 +211,20 @@ module Peatio
 
       # Override create_transaction! to handle both ETH and ERC20 token transfers
       def create_transaction!(transaction, options = {})
-        if @currency.dig(:options, contract_address_option).present?
-          create_erc20_transaction!(transaction, options)
-        elsif @currency[:id] == native_currency_id
-          create_eth_transaction!(transaction, options)
-        else
-          raise Peatio::Wallet::ClientError.new("Currency #{@currency[:id]} doesn't have option #{contract_address_option}")
+        begin
+          if @currency.dig(:options, contract_address_option).present?
+            result = create_erc20_transaction!(transaction, options)
+          elsif @currency[:id] == native_currency_id
+            result = create_eth_transaction!(transaction, options)
+          else
+            raise Peatio::Wallet::ClientError.new("Currency #{@currency[:id]} doesn't have option #{contract_address_option}")
+          end
+          
+          # Make sure we're returning the transaction object, not just true
+          return transaction
+        rescue Ethereum::Client::Error => e
+          raise Peatio::Wallet::ClientError, e
         end
-      rescue Ethereum::Client::Error => e
-        raise Peatio::Wallet::ClientError, e
       end
 
       protected
@@ -230,6 +235,15 @@ module Peatio
         options.merge!(DEFAULT_ETH_FEE, currency_options)
 
         amount = convert_to_base_unit(transaction.amount)
+
+        # Log balance before sending transaction
+        begin
+          wallet_address = normalize_address(@wallet.fetch(:address))
+          balance = client.json_rpc(:eth_getBalance, [wallet_address, 'latest']).hex
+          Rails.logger.info { "Wallet balance: #{balance} (#{balance / 1e18} ETH)" }
+        rescue => e
+          Rails.logger.warn { "Failed to get balance: #{e.message}" }
+        end
 
         # Force legacy gas price for now - eth gem 0.5.7 doesn't support EIP-1559
         gas_params = get_legacy_gas_price(options)
@@ -258,6 +272,14 @@ module Peatio
         
         # Get chain ID for this transaction
         current_chain_id = chain_id
+        
+        # Log nonce
+        begin
+          nonce = client.json_rpc(:eth_getTransactionCount, [wallet_address, 'pending']).hex
+          Rails.logger.info { "Using nonce: #{nonce}" }
+        rescue => e
+          Rails.logger.warn { "Failed to get nonce: #{e.message}" }
+        end
         
         # Prepare transaction data
         tx_data = {
@@ -299,31 +321,9 @@ module Peatio
         transaction.amount = convert_from_base_unit(amount)
         transaction.hash = normalize_txid(txid)
         transaction.options = options
+        
+        # Return the updated transaction - don't add code after this
         transaction
-
-        # Log balance before sending transaction
-        begin
-          balance = client.json_rpc(:eth_getBalance, [wallet_address, 'latest']).hex
-          Rails.logger.info { "Wallet balance: #{balance} (#{balance / 1e18} ETH)" }
-        rescue => e
-          Rails.logger.warn { "Failed to get balance: #{e.message}" }
-        end
-
-        # Log nonce
-        begin
-          nonce = client.json_rpc(:eth_getTransactionCount, [wallet_address, 'pending']).hex
-          Rails.logger.info { "Using nonce: #{nonce}" }
-        rescue => e
-          Rails.logger.warn { "Failed to get nonce: #{e.message}" }
-        end
-
-        # Log gas parameters
-        if gas_params[:eip1559]
-          Rails.logger.info { "EIP-1559 fees: max_fee=#{gas_params[:max_fee_per_gas]} (#{gas_params[:max_fee_per_gas] / 1e9} Gwei), " +
-                             "priority_fee=#{gas_params[:max_priority_fee_per_gas]} (#{gas_params[:max_priority_fee_per_gas] / 1e9} Gwei)" }
-        else
-          Rails.logger.info { "Legacy gas price: #{gas_params[:gas_price]} (#{gas_params[:gas_price] / 1e9} Gwei)" }
-        end
       end
 
       # Send ERC20 tokens using local signing
