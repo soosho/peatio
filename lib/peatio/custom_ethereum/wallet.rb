@@ -20,6 +20,55 @@ module Peatio
         raise Peatio::Wallet::ClientError, e
       end
 
+      # Get chain ID from wallet settings or other sources
+      def chain_id
+        # Try to get chain ID from wallet settings
+        if @wallet.dig(:settings, :chain_id).present?
+          chain_id_value = @wallet.dig(:settings, :chain_id).to_i
+          Rails.logger.info { "Using chain ID #{chain_id_value} from wallet settings" }
+          return chain_id_value
+        end
+        
+        # Try to get chain ID from currency options (fallback)
+        if @currency.dig(:options, :chain_id).present?
+          chain_id_value = @currency.dig(:options, :chain_id).to_i
+          Rails.logger.info { "Using chain ID #{chain_id_value} from currency options" }
+          return chain_id_value
+        end
+        
+        # Try to query the node
+        begin
+          chain_id_value = client.json_rpc(:eth_chainId).hex
+          Rails.logger.info { "Using chain ID #{chain_id_value} from node" }
+          return chain_id_value if chain_id_value > 0
+        rescue => e
+          Rails.logger.warn { "Failed to get chain ID from node: #{e.message}" }
+        end
+        
+        # Fallback based on blockchain_key
+        if @wallet[:blockchain_key].present?
+          case @wallet[:blockchain_key].to_s
+          when /sepolia/
+            Rails.logger.info { "Using chain ID 11155111 (Sepolia) based on blockchain key" }
+            return 11155111
+          when /goerli/
+            Rails.logger.info { "Using chain ID 5 (Goerli) based on blockchain key" }
+            return 5
+          when /bsc/
+            Rails.logger.info { "Using chain ID 56 (BSC) based on blockchain key" }
+            return 56
+          when /bsc-testnet/
+            Rails.logger.info { "Using chain ID 97 (BSC Testnet) based on blockchain key" }
+            return 97
+          # Add other networks as needed
+          end
+        end
+        
+        # Default to Ethereum mainnet
+        Rails.logger.warn { "Using default chain ID 1 (Ethereum mainnet)" }
+        1
+      end
+
       # Override create_transaction! to handle both ETH and ERC20 token transfers
       def create_transaction!(transaction, options = {})
         if @currency.dig(:options, contract_address_option).present?
@@ -73,14 +122,18 @@ module Peatio
           nonce: client.json_rpc(:eth_getTransactionCount, [wallet_address, 'pending']).hex
         }
         
-        # Sign the transaction locally
+        # Get chain ID for this transaction
+        current_chain_id = chain_id
+        
+        # Sign the transaction locally with chain ID
         raw_tx = Eth::Tx.new({
           value: tx_data[:value],
           data: '',
           gas_limit: tx_data[:gas_limit],
           gas_price: tx_data[:gas_price],
           nonce: tx_data[:nonce],
-          to: tx_data[:to]
+          to: tx_data[:to],
+          chain_id: current_chain_id
         })
         raw_tx.sign(key)
         
@@ -139,14 +192,18 @@ module Peatio
           nonce: client.json_rpc(:eth_getTransactionCount, [wallet_address, 'pending']).hex
         }
         
-        # Sign the transaction locally
+        # Get chain ID for this transaction
+        current_chain_id = chain_id
+        
+        # Sign the transaction locally with chain ID
         raw_tx = Eth::Tx.new({
           value: tx_data[:value],
           data: tx_data[:data],
           gas_limit: tx_data[:gas_limit],
           gas_price: tx_data[:gas_price],
           nonce: tx_data[:nonce],
-          to: tx_data[:to]
+          to: tx_data[:to],
+          chain_id: current_chain_id
         })
         raw_tx.sign(key)
         
