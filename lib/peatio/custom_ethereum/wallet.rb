@@ -118,11 +118,15 @@ module Peatio
           # Get a reasonable priority fee (tip) - 50th percentile
           priority_fee = fee_history['reward'][0][1].hex
           
-          # Ensure minimum values
-          priority_fee = 1_500_000_000 if priority_fee < 1_000_000_000 # Minimum 1 Gwei
+          # Ensure minimum values and proper integers
+          priority_fee = [priority_fee, 1_000_000_000].max # At least 1 Gwei
           
           # Max fee should be base fee + priority fee with some buffer for base fee increases
-          max_fee = (base_fee * 2) + priority_fee
+          max_fee = [(base_fee * 2) + priority_fee, 2_000_000_000].max # At least 2 Gwei
+          
+          # Make sure both are integers
+          max_fee = max_fee.to_i
+          priority_fee = priority_fee.to_i
           
           Rails.logger.info { "Calculated EIP-1559 fees: base_fee=#{base_fee}, priority_fee=#{priority_fee}, max_fee=#{max_fee}" }
           
@@ -170,6 +174,11 @@ module Peatio
           # Get current gas price from the network
           gas_price = client.json_rpc(:eth_gasPrice).hex
           
+          # Ensure minimum valid gas price
+          if gas_price < 1_000_000_000 # Less than 1 Gwei
+            gas_price = 1_000_000_000 # Set minimum to 1 Gwei
+          end
+          
           # Apply multiplier based on network
           current_chain = chain_id
           
@@ -182,6 +191,9 @@ module Peatio
           
           # Apply the multiplier to ensure transaction goes through
           gas_price = (gas_price * multiplier).to_i
+          
+          # Ensure the result is a proper integer (not a float)
+          gas_price = gas_price.to_i
           
           Rails.logger.info { "Calculated gas price: #{gas_price} (#{gas_price / 1_000_000_000.0} Gwei)" }
           
@@ -274,7 +286,7 @@ module Peatio
         # Sign the transaction based on the fee model
         if gas_params[:eip1559]
           # EIP-1559 transaction (type 2)
-          raw_tx = Eth::Tx.new({
+          tx_params = {
             value: tx_data[:value],
             data: '',
             gas_limit: tx_data[:gas_limit],
@@ -282,16 +294,17 @@ module Peatio
             max_priority_fee_per_gas: gas_params[:max_priority_fee_per_gas],
             nonce: tx_data[:nonce],
             to: tx_data[:to],
-            chain_id: current_chain_id,
-            type: '0x02' # EIP-1559 transaction type
-          })
+            chain_id: current_chain_id
+          }
           
-          Rails.logger.info { "Creating EIP-1559 transaction with max_fee=#{gas_params[:max_fee_per_gas]}, " \
-                             "priority_fee=#{gas_params[:max_priority_fee_per_gas]} " \
-                             "to #{transaction.to_address} with amount #{amount}" }
+          # Debug log the parameters
+          Rails.logger.info { "EIP-1559 TX params: #{tx_params.inspect}" }
+          
+          # Create the transaction
+          raw_tx = Eth::Tx.new(tx_params)
         else
           # Legacy transaction
-          raw_tx = Eth::Tx.new({
+          tx_params = {
             value: tx_data[:value],
             data: '',
             gas_limit: tx_data[:gas_limit],
@@ -299,10 +312,13 @@ module Peatio
             nonce: tx_data[:nonce],
             to: tx_data[:to],
             chain_id: current_chain_id
-          })
+          }
           
-          Rails.logger.info { "Creating legacy transaction with gas_price=#{gas_params[:gas_price]} " \
-                             "to #{transaction.to_address} with amount #{amount}" }
+          # Debug log the parameters
+          Rails.logger.info { "Legacy TX params: #{tx_params.inspect}" }
+          
+          # Create the transaction
+          raw_tx = Eth::Tx.new(tx_params)
         end
         
         raw_tx.sign(key)
@@ -321,6 +337,30 @@ module Peatio
         transaction.hash = normalize_txid(txid)
         transaction.options = options
         transaction
+
+        # Log balance before sending transaction
+        begin
+          balance = client.json_rpc(:eth_getBalance, [wallet_address, 'latest']).hex
+          Rails.logger.info { "Wallet balance: #{balance} (#{balance / 1e18} ETH)" }
+        rescue => e
+          Rails.logger.warn { "Failed to get balance: #{e.message}" }
+        end
+
+        # Log nonce
+        begin
+          nonce = client.json_rpc(:eth_getTransactionCount, [wallet_address, 'pending']).hex
+          Rails.logger.info { "Using nonce: #{nonce}" }
+        rescue => e
+          Rails.logger.warn { "Failed to get nonce: #{e.message}" }
+        end
+
+        # Log gas parameters
+        if gas_params[:eip1559]
+          Rails.logger.info { "EIP-1559 fees: max_fee=#{gas_params[:max_fee_per_gas]} (#{gas_params[:max_fee_per_gas] / 1e9} Gwei), " +
+                             "priority_fee=#{gas_params[:max_priority_fee_per_gas]} (#{gas_params[:max_priority_fee_per_gas] / 1e9} Gwei)" }
+        else
+          Rails.logger.info { "Legacy gas price: #{gas_params[:gas_price]} (#{gas_params[:gas_price] / 1e9} Gwei)" }
+        end
       end
 
       # Send ERC20 tokens using local signing
@@ -406,6 +446,59 @@ module Peatio
         transaction.hash = normalize_txid(txid)
         transaction.options = options
         transaction
+      end
+
+      # Add this method to check if the eth gem supports EIP-1559
+      def supports_eip1559_in_eth_gem?
+        # Check if we're using a version of eth gem that supports EIP-1559
+        begin
+          # Try creating a transaction with EIP-1559 parameters
+          Eth::Tx.new({
+            value: 0,
+            data: '',
+            gas_limit: 21000,
+            max_fee_per_gas: 30_000_000_000,
+            max_priority_fee_per_gas: 1_500_000_000,
+            nonce: 0,
+            to: "0x0000000000000000000000000000000000000000",
+            chain_id: 1
+          })
+          true
+        rescue ArgumentError, NoMethodError => e
+          Rails.logger.warn { "Eth gem doesn't support EIP-1559: #{e.message}" }
+          false
+        end
+      end
+
+      # Then update your detect_eip1559_support method
+      def detect_eip1559_support
+        # Check if eth gem supports EIP-1559
+        unless supports_eip1559_in_eth_gem?
+          Rails.logger.info { "Eth gem doesn't support EIP-1559, using legacy transactions" }
+          return false
+        end
+        
+        # Manual override if specified in wallet settings
+        if @wallet.dig(:settings, :use_eip1559).present?
+          return @wallet.dig(:settings, :use_eip1559).to_s.downcase == 'true'
+        end
+        
+        # Known networks that support EIP-1559
+        eip1559_networks = [1, 5, 11155111] # ETH mainnet, Goerli, Sepolia
+        current_chain = chain_id
+        
+        if eip1559_networks.include?(current_chain)
+          return true
+        end
+        
+        # Try to detect by checking if eth_feeHistory is available
+        begin
+          client.json_rpc(:eth_feeHistory, [1, 'latest', []])
+          return true
+        rescue => e
+          Rails.logger.info { "Network does not support EIP-1559 fee history: #{e.message}" }
+          return false
+        end
       end
     end
   end
