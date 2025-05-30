@@ -81,7 +81,7 @@ module Peatio
         end
         
         # Known networks that support EIP-1559
-        eip1559_networks = [1, 5, 11155111] # ETH mainnet, Goerli, Sepolia
+        eip1559_networks = [1, 5, 11155111, 137, 80001] # ETH mainnet, Goerli, Sepolia, Polygon mainnet, Polygon Mumbai
         current_chain = chain_id
         
         if eip1559_networks.include?(current_chain)
@@ -175,6 +175,8 @@ module Peatio
             multiplier = case current_chain
                         when 56, 97 # BSC mainnet, testnet
                           1.1 # BSC typically needs only small increase
+                        when 137, 80001 # Polygon mainnet, Mumbai testnet
+                          1.3 # Polygon often needs higher multiplier due to gas price volatility
                         else
                           1.2 # Default 20% increase for most networks
                         end
@@ -193,6 +195,10 @@ module Peatio
           gas_price = case current_chain
                      when 56, 97 # BSC
                        5_000_000_000 # 5 Gwei
+                     when 137 # Polygon Mainnet
+                       40_000_000_000 # 40 Gwei (Polygon can have higher base gas prices)
+                     when 80001 # Polygon Mumbai
+                       10_000_000_000 # 10 Gwei for testnet
                      else
                        30_000_000_000 # 30 Gwei for other networks
                      end
