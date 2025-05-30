@@ -11,4 +11,4 @@ Peatio::Wallet.registry[:opendax_cloud] = OpendaxCloud::Wallet
 Peatio::Wallet.registry[:open_eth] = Ethereum::OpenEth::Wallet
 Peatio::Wallet.registry[:custom_ethereum] = Peatio::CustomEthereum::Wallet
 Peatio::Wallet.registry[:dogecoind] = Peatio::Dogecoin::Wallet
-Peatio::Wallet.registry[:tenzurad] = Peatio::Tenzura::Wallet
+Peatio::Wallet.registry[:tenzurad] = Tenzura::Wallet
