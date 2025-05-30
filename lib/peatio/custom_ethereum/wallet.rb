@@ -14,7 +14,8 @@ module Peatio
         key = Eth::Key.new(priv: private_key)
         
         # Return both the address and private key
-        { address: normalize_address(key.address), secret: private_key }
+        # Convert address to string before normalizing
+        { address: normalize_address(key.address.to_s), secret: private_key }
       rescue StandardError => e
         raise Peatio::Wallet::ClientError, e
       end
@@ -58,7 +59,7 @@ module Peatio
         key = Eth::Key.new(priv: private_key)
         
         # Make sure the key corresponds to the wallet address
-        unless normalize_address(key.address) == wallet_address
+        unless normalize_address(key.address.to_s) == wallet_address
           raise Peatio::Wallet::ClientError, "Private key doesn't match the wallet address"
         end
         
@@ -123,7 +124,7 @@ module Peatio
         key = Eth::Key.new(priv: private_key)
         
         # Make sure the key corresponds to the wallet address
-        unless normalize_address(key.address) == wallet_address
+        unless normalize_address(key.address.to_s) == wallet_address
           raise Peatio::Wallet::ClientError, "Private key doesn't match the wallet address"
         end
         
