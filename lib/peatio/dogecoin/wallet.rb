@@ -25,7 +25,7 @@ module Dogecoin
       # Create a Dogecoin address via RPC
       client.json_rpc(:getnewaddress)
             .yield_self { |address| { address: address, secret: nil } }
-    rescue Peatio::Dogecoin::Client::Error => e
+    rescue Dogecoin::Client::Error => e  # Changed from Peatio::Dogecoin::Client::Error
       raise Peatio::Wallet::ClientError, e
     end
 
@@ -52,7 +52,7 @@ module Dogecoin
                               "",  # comment
                               "",  # comment_to
                               false])  # subtract fee from amount
-      rescue Peatio::Dogecoin::Client::Error => e
+      rescue Dogecoin::Client::Error => e  # Changed from Peatio::Dogecoin::Client::Error
         handle_send_error(e, transaction, destination_address)
       end
 
@@ -64,7 +64,7 @@ module Dogecoin
 
     def load_balance!
       client.json_rpc(:getbalance).to_d
-    rescue Peatio::Dogecoin::Client::Error => e
+    rescue Dogecoin::Client::Error => e  # Changed from Peatio::Dogecoin::Client::Error
       raise Peatio::Wallet::ClientError, e
     end
 
@@ -79,7 +79,7 @@ module Dogecoin
     end
 
     def client_from_settings
-      @client = Peatio::Dogecoin::Client.new(
+      @client = Dogecoin::Client.new(  # Changed from Peatio::Dogecoin::Client.new
         @wallet.fetch(:uri),
         idle_timeout: 5
       )
