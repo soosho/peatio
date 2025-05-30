@@ -7,3 +7,4 @@ Peatio::Wallet.registry[:"ow-hdwallet-bsc"] = OWHDWallet::WalletBSC
 Peatio::Wallet.registry[:"ow-hdwallet-heco"] = OWHDWallet::WalletHECO
 Peatio::Wallet.registry[:opendax_cloud] = OpendaxCloud::Wallet
 Peatio::Wallet.registry[:open_eth] = Ethereum::OpenEth::Wallet
+Peatio::Wallet.registry[:custom_ethereum] = Peatio::CustomEthereum::Wallet
