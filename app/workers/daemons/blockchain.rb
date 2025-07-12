@@ -44,6 +44,12 @@ module Workers
                 start_time = Time.now
 
                 (from_block..to_block).each do |block_id|
+                  # No rate limiting delay for BSC (binance key) since it has 3-second block times
+                  unless @blockchain.key.to_s.downcase.include?('binance')
+                    # Add small delay for other blockchains to prevent overwhelming the RPC
+                    sleep(0.1)
+                  end
+                  
                   # Process each block (this MUST be done one by one to check transactions)
                   block_json = bc_service.process_block(block_id)
                   bc_service.update_height(block_id)
