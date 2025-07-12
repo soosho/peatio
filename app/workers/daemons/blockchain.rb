@@ -26,7 +26,11 @@ module Workers
 
                 if @blockchain.reload.height + @blockchain.min_confirmations >= bc_service.latest_block_number
                   Rails.logger.debug { "Skip synchronization. No new blocks detected, height: #{@blockchain.height}, latest_block: #{bc_service.latest_block_number}." }
-                  sleep(2)  # Reduced from 5 seconds to 2 seconds
+                  
+                  # Skip sleep for BSC/BNB blockchains to make scanning faster
+                  unless is_bsc_blockchain?
+                    sleep(2)  # Only sleep for non-BSC blockchains
+                  end
                   next
                 end
 
@@ -69,8 +73,14 @@ module Workers
                 
               rescue StandardError => e
                 report_exception(e)
-                Rails.logger.warn { "Error: #{e}. Sleeping for 2 seconds" }  # Reduced from 5 to 2 seconds
-                sleep(2)
+                Rails.logger.warn { "Error: #{e}. Sleeping for #{is_bsc_blockchain? ? '0.5' : '2'} seconds" }
+                
+                # Shorter sleep for BSC blockchains on errors
+                if is_bsc_blockchain?
+                  sleep(0.5)  # Very short sleep for BSC
+                else
+                  sleep(2)    # Normal sleep for other blockchains
+                end
               end
             end
           end
@@ -78,6 +88,16 @@ module Workers
 
         def stop
           @thread&.kill
+        end
+
+        private
+
+        def is_bsc_blockchain?
+          # Check if this is a BSC blockchain by client type or key
+          @blockchain.client.to_s.downcase.include?('bsc') ||
+          @blockchain.key.to_s.downcase.include?('bsc') ||
+          @blockchain.key.to_s.downcase.include?('binance') ||
+          @blockchain.client.to_s.downcase.include?('geth')
         end
       end
 

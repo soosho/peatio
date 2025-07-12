@@ -32,15 +32,32 @@ module Ethereum
 
       @settings.merge!(settings.slice(*SUPPORTED_SETTINGS))
       @settings[:currencies]&.each do |c|
+        Rails.logger.debug "Configuring currency: #{c[:id]}, options: #{c[:options]}"
+        
         if c.dig(:options, contract_address_option).present?
           @erc20 << c
+          Rails.logger.debug "Added #{c[:id]} as ERC20/BEP20 token"
         elsif c[:id] == native_currency_id
           raise "Unexpected duplicated native token #{c[:id]}" unless @eth.nil?
+          
+          # Validate that native currency has required fields
+          unless c.key?(:base_factor)
+            Rails.logger.error "Native currency #{c[:id]} is missing base_factor"
+            next
+          end
 
           @eth = c
+          Rails.logger.debug "Set #{c[:id]} as native currency"
         else
-          Rails.logger.error "Currency #{c[:id]} doesn't have option #{contract_address_option}"
+          Rails.logger.warn "Currency #{c[:id]} doesn't have option #{contract_address_option} and is not the native currency (#{native_currency_id})"
         end
+      end
+      
+      # Final validation
+      if @eth.nil?
+        Rails.logger.error "Native currency '#{native_currency_id}' was not found in currency configuration. Available currencies: #{@settings[:currencies]&.map { |c| c[:id] }&.join(', ')}"
+      else
+        Rails.logger.info "Successfully configured native currency: #{@eth[:id]}"
       end
     end
 
@@ -191,6 +208,12 @@ module Ethereum
     end
 
     def build_eth_transactions(block_txn)
+      # Safety check: ensure @eth is properly configured
+      if @eth.nil?
+        Rails.logger.error "Native currency (#{native_currency_id}) is not properly configured. Check currency configuration."
+        return []
+      end
+
       [
         {
           hash:           normalize_txid(block_txn.fetch('hash')),
@@ -275,6 +298,16 @@ module Ethereum
     end
 
     def convert_from_base_unit(value, currency)
+      if currency.nil?
+        Rails.logger.error "Currency is nil in convert_from_base_unit. Check currency configuration."
+        return 0.to_d
+      end
+
+      unless currency.key?(:base_factor)
+        Rails.logger.error "Currency #{currency[:id]} is missing base_factor. Check currency configuration."
+        return 0.to_d
+      end
+
       value.to_d / currency.fetch(:base_factor).to_d
     end
   end
