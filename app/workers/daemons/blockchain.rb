@@ -27,9 +27,9 @@ module Workers
                 if @blockchain.reload.height + @blockchain.min_confirmations >= bc_service.latest_block_number
                   Rails.logger.debug { "Skip synchronization. No new blocks detected, height: #{@blockchain.height}, latest_block: #{bc_service.latest_block_number}." }
                   
-                  # Skip sleep for BSC/BNB blockchains to make scanning faster
-                  unless is_bsc_blockchain?
-                    sleep(2)  # Only sleep for non-BSC blockchains
+                  # No sleep for BSC (binance key)
+                  unless @blockchain.key.to_s.downcase.include?('binance')
+                    sleep(2)
                   end
                   next
                 end
@@ -73,13 +73,18 @@ module Workers
                 
               rescue StandardError => e
                 report_exception(e)
-                Rails.logger.warn { "Error: #{e}. Sleeping for #{is_bsc_blockchain? ? '0.5' : '2'} seconds" }
                 
-                # Shorter sleep for BSC blockchains on errors
-                if is_bsc_blockchain?
-                  sleep(0.5)  # Very short sleep for BSC
+                # Special handling for rate limiting errors
+                if e.message.include?('Too Many Requests') || e.message.include?('429')
+                  Rails.logger.warn { "Rate limit hit for #{@blockchain.key}. Sleeping for 5 seconds" }
+                  sleep(5)  # Longer sleep for rate limiting
                 else
-                  sleep(2)    # Normal sleep for other blockchains
+                  Rails.logger.warn { "Error: #{e}. Sleeping for 2 seconds" }
+                  
+                  # No sleep for BSC (binance key)
+                  unless @blockchain.key.to_s.downcase.include?('binance')
+                    sleep(2)
+                  end
                 end
               end
             end
@@ -88,16 +93,6 @@ module Workers
 
         def stop
           @thread&.kill
-        end
-
-        private
-
-        def is_bsc_blockchain?
-          # Check if this is a BSC blockchain by client type or key
-          @blockchain.client.to_s.downcase.include?('bsc') ||
-          @blockchain.key.to_s.downcase.include?('bsc') ||
-          @blockchain.key.to_s.downcase.include?('binance') ||
-          @blockchain.client.to_s.downcase.include?('geth')
         end
       end
 
