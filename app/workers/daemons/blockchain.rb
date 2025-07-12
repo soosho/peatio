@@ -25,25 +25,52 @@ module Workers
                 bc_service.reset!
 
                 if @blockchain.reload.height + @blockchain.min_confirmations >= bc_service.latest_block_number
-                  Rails.logger.info { "Skip synchronization. No new blocks detected, height: #{@blockchain.height}, latest_block: #{bc_service.latest_block_number}." }
-                  Rails.logger.info { "Sleeping for 10 seconds" }
-                  sleep(10)
+                  Rails.logger.debug { "Skip synchronization. No new blocks detected, height: #{@blockchain.height}, latest_block: #{bc_service.latest_block_number}." }
+                  sleep(2)  # Reduced from 5 seconds to 2 seconds
                   next
                 end
 
                 from_block = @blockchain.height || 0
+                to_block = bc_service.latest_block_number
+                total_blocks = to_block - from_block
+                
+                Rails.logger.info { "Processing #{total_blocks} blocks from #{from_block} to #{to_block} for #{@blockchain.key}" }
+                
+                processed_count = 0
+                start_time = Time.now
 
-                (from_block..bc_service.latest_block_number).each do |block_id|
-                  Rails.logger.info { "Started processing #{@blockchain.key} block number #{block_id}." }
+                (from_block..to_block).each do |block_id|
+                  # Process each block (this MUST be done one by one to check transactions)
                   block_json = bc_service.process_block(block_id)
-                  Rails.logger.info { "Fetch #{block_json.transactions.count} transactions in block number #{block_id}." }
                   bc_service.update_height(block_id)
-                  Rails.logger.info { "Finished processing #{@blockchain.key} block number #{block_id}." }
+                  
+                  processed_count += 1
+                  
+                  # Log progress every 200 blocks instead of every block to reduce I/O
+                  if processed_count % 200 == 0 || block_id == to_block
+                    elapsed_time = Time.now - start_time
+                    blocks_per_second = processed_count / elapsed_time
+                    remaining_blocks = to_block - block_id
+                    eta_seconds = remaining_blocks / blocks_per_second if blocks_per_second > 0
+                    
+                    Rails.logger.info { 
+                      "#{@blockchain.key}: #{processed_count}/#{total_blocks} blocks " \
+                      "(#{blocks_per_second.round(2)} blocks/sec, ETA: #{eta_seconds ? eta_seconds.round(0) : 'N/A'}s) " \
+                      "Block #{block_id}"
+                    }
+                  end
+                  
+                  # Only yield to other threads occasionally to maintain speed
+                  Thread.pass if processed_count % 50 == 0
                 end
+                
+                total_time = Time.now - start_time
+                Rails.logger.info { "Completed #{processed_count} blocks for #{@blockchain.key} in #{total_time.round(2)}s (#{(processed_count/total_time).round(2)} blocks/sec)" }
+                
               rescue StandardError => e
                 report_exception(e)
-                Rails.logger.warn { "Error: #{e}. Sleeping for 10 seconds" }
-                sleep(10)
+                Rails.logger.warn { "Error: #{e}. Sleeping for 2 seconds" }  # Reduced from 5 to 2 seconds
+                sleep(2)
               end
             end
           end

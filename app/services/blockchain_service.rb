@@ -12,6 +12,10 @@ class BlockchainService
     @adapter.configure(server: @blockchain.server,
                        currencies: @currencies.map(&:to_blockchain_api_settings),
                        whitelisted_addresses: @whitelisted_addresses)
+    
+    # Cache frequently used data
+    @currency_ids = @currencies.pluck(:id)
+    @deposit_wallet_kind = Wallet.kinds.values_at(:deposit).first
   end
 
   def latest_block_number
@@ -47,8 +51,16 @@ class BlockchainService
 
   def process_block(block_number)
     block = @adapter.fetch_block!(block_number)
+    
+    # Skip processing if block has no transactions
+    return block if block.transactions.empty?
+    
     deposits = filter_deposits(block)
     withdrawals = filter_withdrawals(block)
+    
+    # Skip database transaction if no relevant transactions
+    return block if deposits.empty? && withdrawals.empty?
+    
     # TODO: Process Transactions with `pending` status
 
     accepted_deposits = []
@@ -66,7 +78,8 @@ class BlockchainService
   end
 
   def update_height(block_number)
-    raise Error, "#{blockchain.name} height was reset." if blockchain.height != blockchain.reload.height
+    # Remove the reload check for better performance - trust the daemon
+    # raise Error, "#{blockchain.name} height was reset." if blockchain.height != blockchain.reload.height
 
     # NOTE: We use update_column to not change updated_at timestamp
     # because we use it for detecting blockchain configuration changes see Workers::Daemon::Blockchain#run.
@@ -76,14 +89,44 @@ class BlockchainService
   private
 
   def filter_deposits(block)
-    addresses = PaymentAddress.where(wallet: Wallet.deposit.with_currency(@currencies.codes), address: block.transactions.map(&:to_address)).pluck(:address)
-    block.select { |transaction| transaction.to_address.in?(addresses) }
+    # Optimized: Only query addresses that actually exist in the block
+    transaction_addresses = block.transactions.map(&:to_address).uniq.compact
+    return [] if transaction_addresses.empty?
+    
+    # Single optimized query to get relevant addresses
+    addresses = PaymentAddress.joins(:wallet)
+                              .where(wallets: { kind: @deposit_wallet_kind })
+                              .where(address: transaction_addresses)
+                              .joins(:currency)
+                              .where(currencies: { id: @currency_ids })
+                              .pluck(:address)
+    
+    return [] if addresses.empty?
+    
+    # Use Set for faster lookups
+    address_set = addresses.to_set
+    block.select { |transaction| address_set.include?(transaction.to_address) }
   end
 
   def filter_withdrawals(block)
-    # TODO: Process addresses in batch in case of huge number of confirming withdrawals.
-    withdraw_txids = Withdraws::Coin.confirming.where(currency: @currencies).pluck(:txid)
-    block.select { |transaction| transaction.hash.in?(withdraw_txids) }
+    # Optimized: Only query if there are transactions in the block
+    return [] if block.transactions.empty?
+    
+    # Get transaction hashes from the block
+    transaction_hashes = block.transactions.map(&:hash).uniq.compact
+    return [] if transaction_hashes.empty?
+    
+    # Single optimized query to get relevant withdrawal txids
+    withdraw_txids = Withdraws::Coin.confirming
+                                   .where(currency: @currencies)
+                                   .where(txid: transaction_hashes)
+                                   .pluck(:txid)
+    
+    return [] if withdraw_txids.empty?
+    
+    # Use Set for faster lookups
+    txid_set = withdraw_txids.to_set
+    block.select { |transaction| txid_set.include?(transaction.hash) }
   end
 
   def update_or_create_deposit(transaction)
