@@ -3,7 +3,30 @@ require 'eth'
 module Peatio
   module CustomEthereum
     class Wallet < ::Ethereum::WalletAbstract
-      include ::Ethereum::Eth::Params
+      # Smart params detection - use BSC params for Infura, ETH params otherwise
+      def native_currency_id
+        if using_infura?
+          'bnb'  # BSC native currency
+        else
+          'eth'  # ETH native currency
+        end
+      end
+
+      def coin_type
+        if using_infura?
+          'bsc'  # BSC coin type
+        else
+          'eth'  # ETH coin type
+        end
+      end
+
+      def token_name
+        if using_infura?
+          'bep20'  # BSC token standard
+        else
+          'erc20'  # ETH token standard
+        end
+      end
 
       # Override create_address! to generate addresses locally without using personal_newAccount
       def create_address!(_options = {})
@@ -411,6 +434,13 @@ module Peatio
           Rails.logger.warn { "Failed to check eth gem version: #{e.message}" }
           false
         end
+      end
+      
+      private
+      
+      def using_infura?
+        server_url = @wallet&.dig(:uri) || ''
+        server_url.include?('infura.io')
       end
     end
   end

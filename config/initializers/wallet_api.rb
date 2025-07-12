@@ -1,7 +1,41 @@
+# Smart Geth wallet that detects Infura and uses BSC params
+class SmartGethWallet
+  def self.new
+    SmartGethWallet.new
+  end
+  
+  def initialize
+    @actual_wallet = nil
+  end
+  
+  def configure(settings = {})
+    server = settings.dig(:wallet, :uri) || ''
+    
+    # If using Infura, use BSC params, otherwise use ETH params
+    if server.include?('infura.io')
+      Rails.logger.info "Detected Infura URL, using BSC wallet for BNB native currency"
+      @actual_wallet = Ethereum::Bsc::Wallet.new
+    else
+      Rails.logger.info "Using standard ETH wallet for ETH native currency"
+      @actual_wallet = Ethereum::Eth::Wallet.new
+    end
+    
+    @actual_wallet.configure(settings)
+  end
+  
+  def method_missing(method, *args, &block)
+    @actual_wallet.send(method, *args, &block)
+  end
+  
+  def respond_to_missing?(method, include_private = false)
+    @actual_wallet.respond_to?(method, include_private) || super
+  end
+end
+
 require 'peatio/custom_ethereum'
 
 Peatio::Wallet.registry[:bitcoind] = Bitcoin::Wallet
-Peatio::Wallet.registry[:geth] = Ethereum::Eth::Wallet
+Peatio::Wallet.registry[:geth] = SmartGethWallet
 Peatio::Wallet.registry[:parity] = Ethereum::Eth::Wallet
 Peatio::Wallet.registry[:gnosis] = Gnosis::Wallet
 Peatio::Wallet.registry[:"ow-hdwallet-eth"] = OWHDWallet::WalletETH
