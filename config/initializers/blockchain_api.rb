@@ -2,6 +2,7 @@
 class SmartGethBlockchain
   def initialize
     @actual_blockchain = nil
+    Rails.logger.info "🚀 SmartGethBlockchain initialized!"
   end
   
   def configure(settings = {})

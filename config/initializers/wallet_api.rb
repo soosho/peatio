@@ -2,6 +2,7 @@
 class SmartGethWallet
   def initialize
     @actual_wallet = nil
+    Rails.logger.info "🚀 SmartGethWallet initialized!"
   end
   
   def configure(settings = {})

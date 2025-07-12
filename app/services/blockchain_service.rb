@@ -8,6 +8,9 @@ class BlockchainService
     @blockchain = blockchain
     @currencies = blockchain.currencies.deposit_enabled
     @whitelisted_addresses = blockchain.whitelisted_smart_contracts.active
+    
+    Rails.logger.info "🔧 BlockchainService initializing for blockchain: #{blockchain.key}, client: #{blockchain.client}, server: #{blockchain.server}"
+    
     @adapter = Peatio::Blockchain.registry[blockchain.client.to_sym].new
     @adapter.configure(server: @blockchain.server,
                        currencies: @currencies.map(&:to_blockchain_api_settings),
