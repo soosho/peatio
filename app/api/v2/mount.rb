@@ -75,7 +75,9 @@ module API
                                     name: "JWT",
                                     in:   "header"
                                   }
-                                }
+                                },
+                                security: [], # <-- Add this line to disable security for docs
+                                hide_documentation_path: false
 
       # Mount Management API after swagger. To separate swagger Management API doc.
       # TODO: Find better solution for separating swagger Management API.
