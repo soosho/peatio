@@ -1,9 +1,5 @@
 # Smart Geth wallet that detects Infura and uses BSC params
 class SmartGethWallet
-  def self.new
-    SmartGethWallet.new
-  end
-  
   def initialize
     @actual_wallet = nil
   end
@@ -13,10 +9,10 @@ class SmartGethWallet
     
     # If using Infura, use BSC params, otherwise use ETH params
     if server.include?('infura.io')
-      Rails.logger.info "Detected Infura URL, using BSC wallet for BNB native currency"
+      Rails.logger.info "💰 SmartGethWallet: Detected Infura URL (#{server}), using BSC wallet for BNB native currency"
       @actual_wallet = Ethereum::Bsc::Wallet.new
     else
-      Rails.logger.info "Using standard ETH wallet for ETH native currency"
+      Rails.logger.info "💰 SmartGethWallet: Using standard ETH wallet for ETH native currency (#{server})"
       @actual_wallet = Ethereum::Eth::Wallet.new
     end
     

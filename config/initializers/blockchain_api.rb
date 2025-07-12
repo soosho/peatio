@@ -1,9 +1,5 @@
 # Smart Geth client that detects Infura and uses BSC params
 class SmartGethBlockchain
-  def self.new
-    SmartGethBlockchain.new
-  end
-  
   def initialize
     @actual_blockchain = nil
   end
@@ -13,10 +9,10 @@ class SmartGethBlockchain
     
     # If using Infura, use BSC params, otherwise use ETH params
     if server.include?('infura.io')
-      Rails.logger.info "Detected Infura URL, using BSC blockchain for BNB native currency"
+      Rails.logger.info "🔗 SmartGethBlockchain: Detected Infura URL (#{server}), using BSC blockchain for BNB native currency"
       @actual_blockchain = Ethereum::Bsc::Blockchain.new
     else
-      Rails.logger.info "Using standard ETH blockchain for ETH native currency"
+      Rails.logger.info "🔗 SmartGethBlockchain: Using standard ETH blockchain for ETH native currency (#{server})"
       @actual_blockchain = Ethereum::Eth::Blockchain.new
     end
     
